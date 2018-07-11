@@ -282,11 +282,11 @@ def main():
         # remember best prec@1 and save checkpoint
         is_best = prec1 > best_prec1
         best_prec1 = max(prec1, best_prec1)
-        fname='models/rotationnet_checkpoint.pth.tar'
-        fname2='models/rotationnet_model_best.pth.tar'
+        fname='models/checkpoint.pth.tar'
+        fname2='models/best.pth.tar'
         if nview == 12:
-            fname='models/rotationnet_checkpoint_case1.pth.tar'
-            fname2='models/rotationnet_model_best_case1.pth.tar'
+            fname='models/checkpoint_case1.pth.tar'
+            fname2='models/best_case1.pth.tar'
         save_checkpoint({
             'epoch': epoch + 1,
             'arch': args.arch,
@@ -296,9 +296,9 @@ def main():
         }, is_best,fname,fname2)
 
         # save checkpoint every 100 epochs
-        fname = 'models/rotationnet_checkpoint_epoch_'+str(epoch+1)+'.pth.tar'
+        fname = 'models/checkpoint_epoch_'+str(epoch+1)+'.pth.tar'
         if nview == 12:
-            fname = 'models/rotationnet_checkpoint_case1_epoch_'+str(epoch+1)+'.pth.tar'
+            fname = 'models/checkpoint_case1_epoch_'+str(epoch+1)+'.pth.tar'
         if (epoch + 1) % 100 == 0:
             torch.save({
                 'epoch': epoch + 1,
@@ -436,7 +436,7 @@ def validate(val_loader, model, criterion):
     return top1.avg
 
 
-def save_checkpoint(state, is_best, filename='models/rotationnet_checkpoint.pth.tar', filename2='models/rotationnet_model_best.pth.tar'):
+def save_checkpoint(state, is_best, filename='models/checkpoint.pth.tar', filename2='models/best.pth.tar'):
     torch.save(state, filename)
     if is_best:
         shutil.copyfile(filename, filename2)
