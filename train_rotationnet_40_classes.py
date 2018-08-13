@@ -53,7 +53,7 @@ parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
 parser.add_argument('--print-freq', '-p', default=10, type=int,
                     metavar='N', help='print frequency (default: 10)')
-parser.add_argument('--resume', default='', type=str, metavar='PATH',
+parser.add_argument('-r', '--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on test set')
@@ -207,17 +207,19 @@ def main():
 
     # Data loading code
     valdir = os.path.join(args.data, 'val')
-    testdir = os.path.join(args.data, 'diff-light-test')
+    testdir = os.path.join(args.data, 'test')
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
+
+    size = 224
 
     train_dataset = datasets.ImageFolder(
         traindir,
         transforms.Compose([
             #transforms.CenterCrop(500),
-            transforms.Resize(224),
+            transforms.Resize(size),
             #transforms.RandomRotation(180),
-            transforms.ColorJitter(brightness=0.4, contrast=0.1, saturation=1, hue=0),
+            transforms.ColorJitter(brightness=0.4, contrast=0.4),
             transforms.ToTensor(),
             #normalize,
         ]))
@@ -236,7 +238,7 @@ def main():
     val_loader = torch.utils.data.DataLoader(
         datasets.ImageFolder(valdir, transforms.Compose([
             #transforms.CenterCrop(500),
-            transforms.Resize(224),
+            transforms.Resize(size),
             transforms.ToTensor(),
             #normalize,
         ])),
@@ -247,7 +249,7 @@ def main():
     test_loader = torch.utils.data.DataLoader(
         datasets.ImageFolder(testdir, transforms.Compose([
             # transforms.CenterCrop(500),
-            transforms.Resize(224),
+            transforms.Resize(size),
             transforms.ToTensor(),
             # normalize,
         ])),
@@ -307,6 +309,14 @@ def main():
                 'best_prec1': best_prec1,
                 'optimizer' : optimizer.state_dict(),
             }, fname)
+
+
+def showImg(img):
+    img = img.numpy()
+    img = np.swapaxes(img, 0, 1)
+    img = np.swapaxes(img, 1, 2)
+    plt.imshow(img)
+    plt.show()
             
 
 def train(train_loader, model, criterion, optimizer, epoch):
@@ -328,6 +338,8 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
         input_var = torch.autograd.Variable(input)
         target_ = torch.LongTensor( target.size(0) * nview )
+
+        #showImg(input[0])
 
         # compute output
         output = model(input_var)
@@ -357,7 +369,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
         # compute loss
         loss = criterion(output, target_var)
-        losses.update(loss.data[0], input.size(0))
+        losses.update(loss.data.item(), input.size(0))
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -388,8 +400,9 @@ def validate(val_loader, model, criterion):
     end = time.time()
     for i, (input, target) in enumerate(val_loader):
         target = target.cuda(async=True)
-        input_var = torch.autograd.Variable(input, volatile=True)
-        target_var = torch.autograd.Variable(target, volatile=True)
+        with torch.no_grad():
+            input_var = torch.autograd.Variable(input)
+            target_var = torch.autograd.Variable(target)
 
         # compute output
         output = model(input_var)
@@ -404,9 +417,9 @@ def validate(val_loader, model, criterion):
 
         # measure accuracy and record loss
         prec1, prec5 = my_accuracy(output.data, target, topk=(1, 2))
-        losses.update(loss.data[0], input.size(0))
-        top1.update(prec1[0], input.size(0)/nview)
-        top5.update(prec5[0], input.size(0)/nview)
+        losses.update(loss.data.item(), input.size(0))
+        top1.update(prec1.item(), input.size(0)/nview)
+        top5.update(prec5.item(), input.size(0)/nview)
         '''
         # New test stuff
         fig = plt.figure()
