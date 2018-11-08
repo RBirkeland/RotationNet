@@ -157,7 +157,9 @@ def main():
 
     # Get number of classes from train directory
     traindir = os.path.join(args.data, 'train')
-    num_classes = len([name for name in os.listdir(traindir)])
+    valdir = os.path.join(args.data, 'val')
+    testdir = os.path.join(args.data, 'test')
+    num_classes = len([name for name in os.listdir(testdir)])
     print("num_classes = '{}'".format(num_classes))
 
     # create model
@@ -205,20 +207,34 @@ def main():
 
     cudnn.benchmark = True
 
-    # Data loading code
-    valdir = os.path.join(args.data, 'val')
-    testdir = os.path.join(args.data, 'test')
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
     size = 224
+
+    test_loader = torch.utils.data.DataLoader(
+        datasets.ImageFolder(testdir, transforms.Compose([
+            # transforms.CenterCrop(500),
+            transforms.Resize(size),
+            transforms.ToTensor(),
+            # normalize,
+        ])),
+        batch_size=2, shuffle=False,
+        num_workers=args.workers, pin_memory=True)
+    test_loader.dataset.imgs = sorted(test_loader.dataset.imgs)
+
+    if args.evaluate:
+        validate(test_loader, model, criterion)
+        return
 
     train_dataset = datasets.ImageFolder(
         traindir,
         transforms.Compose([
             #transforms.CenterCrop(500),
             transforms.Resize(size),
-            #transforms.RandomRotation(180),
+            transforms.RandomRotation(90),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomVerticalFlip(),
             transforms.ColorJitter(brightness=0.4, contrast=0.4),
             transforms.ToTensor(),
             #normalize,
@@ -245,21 +261,6 @@ def main():
         batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True)
     val_loader.dataset.imgs = sorted(val_loader.dataset.imgs)
-
-    test_loader = torch.utils.data.DataLoader(
-        datasets.ImageFolder(testdir, transforms.Compose([
-            # transforms.CenterCrop(500),
-            transforms.Resize(size),
-            transforms.ToTensor(),
-            # normalize,
-        ])),
-        batch_size=2, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
-    test_loader.dataset.imgs = sorted(test_loader.dataset.imgs)
-
-    if args.evaluate:
-        validate(test_loader, model, criterion)
-        return
 
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
@@ -443,7 +444,7 @@ def validate(val_loader, model, criterion):
                    i, len(val_loader), batch_time=batch_time, loss=losses,
                    top1=top1, top5=top5))
 
-    print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'
+    print(' * Prec@1 {top1.avg:.3f} Prec@2 {top5.avg:.3f}'
           .format(top1=top1, top5=top5))
 
     return top1.avg
