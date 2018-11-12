@@ -232,9 +232,9 @@ def main():
         transforms.Compose([
             #transforms.CenterCrop(500),
             transforms.Resize(size),
-            transforms.RandomRotation(90),
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomVerticalFlip(),
+            #transforms.RandomRotation(90),
+            #transforms.RandomHorizontalFlip(),
+            #transforms.RandomVerticalFlip(),
             transforms.ColorJitter(brightness=0.4, contrast=0.4),
             transforms.ToTensor(),
             #normalize,
