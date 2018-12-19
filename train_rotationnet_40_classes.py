@@ -16,14 +16,10 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import torchvision.models as models
 import numpy as np
+import torch.nn.functional as F
 
 import matplotlib.pyplot as plt
-
-'''
-NOTES
-- b=12, lr=0.01, val acc=100% after 32 e
-
-'''
+from matplotlib import pylab
 
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
@@ -49,7 +45,7 @@ parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
-parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
+parser.add_argument('--weight-decay', '--wd', default=10e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
 parser.add_argument('--print-freq', '-p', default=10, type=int,
                     metavar='N', help='print frequency (default: 10)')
@@ -71,6 +67,11 @@ parser.add_argument('--case', default='2', type=str,
 best_prec1 = 0
 vcand = np.load('vcand_case2.npy')
 nview = 20
+
+train_loss = []
+train_acc = []
+val_loss = []
+val_acc = []
 
 class FineTuneModel(nn.Module):
     def __init__(self, original_model, arch, num_classes):
@@ -107,6 +108,12 @@ class FineTuneModel(nn.Module):
                 nn.Linear(4096, num_classes),
             )
             self.modelName = 'vgg16'
+        elif arch.startswith('densenet'):
+            self.features = original_model.features
+            self.classifier = nn.Sequential(
+                nn.Linear(1024, num_classes),
+            )
+            self.modelName = 'densenet'
         else :
             raise("Finetuning not supported on this architecture yet")
 
@@ -123,6 +130,9 @@ class FineTuneModel(nn.Module):
             f = f.view(f.size(0), -1)
         elif self.modelName == 'resnet' :
             f = f.view(f.size(0), -1)
+        elif self.modelName == 'densenet':
+            out = F.relu(f, inplace=True)
+            f = F.avg_pool2d(out, kernel_size=7, stride=1).view(f.size(0), -1)
         y = self.classifier(f)
         return y
 
@@ -133,17 +143,20 @@ def main():
 
     args.distributed = args.world_size > 1
 
+    total_train_time = 0.0
+
     print(np.load('vcand_case1.npy').shape)
 
     if args.case == '1':
         vcand = np.load('vcand_case1.npy')
+        print(vcand)
         nview = 12
 
     if args.case == '3':
         vcand = np.array([[0, 1, 2], [1, 2, 0], [2, 0, 1]])
         nview = 3
     if args.case == '4':
-        vcand = np.array([[0, 1]])
+        vcand = np.array([[0, 1], [1, 0]])
         nview = 2
 
     if args.batch_size % nview != 0:
@@ -183,8 +196,7 @@ def main():
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
 
-    ##optimizer = torch.optim.SGD(model.parameters(), args.lr,
-    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), # Only finetunable params
+    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
                                 args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
@@ -218,7 +230,7 @@ def main():
         transforms.Compose([
             #transforms.CenterCrop(500),
             transforms.Resize(size),
-            #transforms.RandomRotation(180),
+            transforms.RandomRotation(90),
             transforms.ColorJitter(brightness=0.4, contrast=0.4),
             transforms.ToTensor(),
             #normalize,
@@ -258,7 +270,7 @@ def main():
     test_loader.dataset.imgs = sorted(test_loader.dataset.imgs)
 
     if args.evaluate:
-        validate(test_loader, model, criterion)
+        validate(test_loader, model, criterion, 0)
         return
 
     for epoch in range(args.start_epoch, args.epochs):
@@ -275,11 +287,23 @@ def main():
         inds = inds.T.reshape( nview * train_nsamp )
         train_loader.dataset.imgs = [sorted_imgs[ i ] for i in inds]
 
-        # train for one epoch
-        train(train_loader, model, criterion, optimizer, epoch)
+        if epoch == 20:
+            train_loader = torch.utils.data.DataLoader(
+                train_dataset, batch_size=20, shuffle=False,
+                num_workers=args.workers, pin_memory=True, sampler=train_sampler)
+            print('Changed to Batch size 20')
 
+        model.train()
+        # train for one epoch
+        total_train_time += train(train_loader, model, criterion, optimizer, epoch)
+
+        model.eval()
         # evaluate on validation set
-        prec1 = validate(val_loader, model, criterion)
+        prec1 = validate(val_loader, model, criterion, epoch)
+
+        if prec1 >= 95:
+            print('##########################################################################')
+            print('TIME TAKEN TO 95%: ', total_train_time)
 
         # remember best prec@1 and save checkpoint
         is_best = prec1 > best_prec1
@@ -310,6 +334,37 @@ def main():
                 'optimizer' : optimizer.state_dict(),
             }, fname)
 
+    fig = plt.figure(1)
+    ax = fig.add_subplot(111)
+
+    plt.title('Loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    ax.plot(train_loss,'g--^', label='Train Loss')
+    ax.plot(val_loss, 'r--o', label='Validation Loss')
+
+    handles, labels = ax.get_legend_handles_labels()
+    lgd = ax.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, -0.1))
+
+    fig.savefig('rotationnet_loss', bbox_extra_artists=(lgd,), bbox_inches='tight')
+    plt.show()
+
+    plt.close(fig)
+
+    fig2 = plt.figure(1)
+    ax2 = fig2.add_subplot(111)
+    plt.ylim(0, 105)
+    plt.title('Accuracy')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy')
+    ax2.plot(train_acc , 'g--^', label='Train Accuracy')
+    ax2.plot(val_acc, 'r--o', label='Validation Accuracy')
+
+    handles, labels = ax2.get_legend_handles_labels()
+    lgd = ax2.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, -0.1))
+
+    fig2.savefig('rotationnet_acc', bbox_extra_artists=(lgd,), bbox_inches='tight')
+    plt.show()
 
 def showImg(img):
     img = img.numpy()
@@ -329,6 +384,10 @@ def train(train_loader, model, criterion, optimizer, epoch):
     # switch to train mode
     model.train()
 
+    total_loss = 0.0
+    total_acc = 0.0
+
+    start = time.time()
     end = time.time()
     for i, (input, target) in enumerate(train_loader):
         nsamp = int( input.size(0) / nview )
@@ -350,6 +409,9 @@ def train(train_loader, model, criterion, optimizer, epoch):
         output_ = torch.nn.functional.log_softmax( output )
         output_ = output_[ :, :-1 ] - torch.t( output_[ :, -1 ].repeat( 1, output_.size(1)-1 ).view( output_.size(1)-1, -1 ) )
         output_ = output_.view( -1, nview * nview, num_classes )
+
+        output2 = output_
+
         output_ = output_.data.cpu().numpy()
         output_ = output_.transpose( 1, 2, 0 )
         for j in range(target_.size(0)):
@@ -367,9 +429,15 @@ def train(train_loader, model, criterion, optimizer, epoch):
         target_ = target_.cuda(async=True)
         target_var = torch.autograd.Variable(target_)
 
+        prec1, prec5 = my_accuracy(output2.data, target.cuda(), topk=(1, 2))
+
         # compute loss
         loss = criterion(output, target_var)
         losses.update(loss.data.item(), input.size(0))
+
+
+        total_loss += loss.item()
+        total_acc += prec1
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -385,19 +453,32 @@ def train(train_loader, model, criterion, optimizer, epoch):
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})'.format(
-                   epoch, i, len(train_loader), batch_time=batch_time,
+                   epoch+1, i, len(train_loader), batch_time=batch_time,
                    data_time=data_time, loss=losses))
 
-def validate(val_loader, model, criterion):
+    epoch_time = (time.time() - start)
+
+    train_loss.append(total_loss/len(train_loader))
+    train_acc.append(total_acc/len(train_loader))
+
+    return epoch_time
+
+
+def validate(val_loader, model, criterion, epoch):
     batch_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
     top5 = AverageMeter()
 
+    total_loss = 0.0
+    total_acc = 0.0
+
     # switch to evaluate mode
     model.eval()
 
     end = time.time()
+    start = time.time()
+
     for i, (input, target) in enumerate(val_loader):
         target = target.cuda(async=True)
         with torch.no_grad():
@@ -420,16 +501,10 @@ def validate(val_loader, model, criterion):
         losses.update(loss.data.item(), input.size(0))
         top1.update(prec1.item(), input.size(0)/nview)
         top5.update(prec5.item(), input.size(0)/nview)
-        '''
-        # New test stuff
-        fig = plt.figure()
-        fig.suptitle('', fontsize=12, fontweight='bold')
-        img = input[0].numpy()
-        img = np.swapaxes(img, 0, 1)
-        img = np.swapaxes(img, 1, 2)
-        plt.imshow(img)
-        plt.show()
-        '''
+
+        total_loss += loss.item()
+        total_acc += prec1
+
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
@@ -445,6 +520,11 @@ def validate(val_loader, model, criterion):
 
     print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'
           .format(top1=top1, top5=top5))
+
+    val_loss.append(total_loss / len(val_loader))
+    val_acc.append(total_acc / len(val_loader))
+
+    print('Avg time:', ((time.time() - start) * 1000) / len(val_loader), 'ms')
 
     return top1.avg
 
