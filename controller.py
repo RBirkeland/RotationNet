@@ -19,7 +19,6 @@ import numpy as np
 import torch.nn.functional as F
 
 import matplotlib.pyplot as plt
-from matplotlib import pylab
 
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
@@ -35,13 +34,13 @@ parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet18',
                         ' (default: resnet18)')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('--epochs', default=90, type=int, metavar='N',
+parser.add_argument('--epochs', default=25, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('-b', '--batch-size', default=256, type=int,
+parser.add_argument('-b', '--batch-size', default=4, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
-parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
+parser.add_argument('--lr', '--learning-rate', default=0.0001, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
@@ -61,12 +60,10 @@ parser.add_argument('--dist-url', default='tcp://224.66.41.62:23456', type=str,
                     help='url used to set up distributed training')
 parser.add_argument('--dist-backend', default='gloo', type=str,
                     help='distributed backend')
-parser.add_argument('--case', default='2', type=str,
-                    help='viewpoint setup case (1 or 2)')
+parser.add_argument('--views', default='2', type=str,
+                    help='number of views (2, 3, 12, 20 supported)')
 
 best_prec1 = 0
-vcand = np.load('vcand_case2.npy')
-nview = 20
 
 train_loss = []
 train_acc = []
@@ -92,6 +89,8 @@ class FineTuneModel(nn.Module):
         elif arch.startswith('resnet') :
             # Everything except the last linear layer
             self.features = nn.Sequential(*list(original_model.children())[:-1])
+
+            # Number of input neurons have to be changed for larger architectures. F.ex resnet101 uses 2048.
             self.classifier = nn.Sequential(
                 nn.Linear(512, num_classes)
             )
@@ -145,19 +144,21 @@ def main():
 
     total_train_time = 0.0
 
-    print(np.load('vcand_case1.npy').shape)
-
-    if args.case == '1':
+    if args.views == '12':
         vcand = np.load('vcand_case1.npy')
-        print(vcand)
         nview = 12
-
-    if args.case == '3':
+    elif args.views == '20':
+        vcand = np.load('vcand_case2.npy')
+        nview = 20
+    elif args.views == '3':
         vcand = np.array([[0, 1, 2], [1, 2, 0], [2, 0, 1]])
         nview = 3
-    if args.case == '4':
-        vcand = np.array([[0, 1], [1, 0]])
+    elif args.views == '2':
+        vcand = np.array([[0, 1]])
         nview = 2
+    else:
+        print("Number of views not supported. (Supports 2, 3, 12, 20)")
+        exit()
 
     if args.batch_size % nview != 0:
         print 'Error: batch size should be multiplication of the number of views,', nview
