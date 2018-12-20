@@ -25,6 +25,6 @@ python controller.py <dataset path> -e -r <checkpoint file>
 --views               # Number of views (supports 2, 3, 12, 20)
 --lr                  # Learning rate
 -b                    # Batch size (must be divisible by number of views)
--r  <checkpoint file> # Resume from checkpoint
+-r  <checkpoint path> # Resume from checkpoint
 -e                    # Evaluatation mode, only use test set (use together with -r to test model)
 ```
