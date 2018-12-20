@@ -1,13 +1,10 @@
 # RotationNet
 
-## Make virtualenv for Python2.7
+## Make virtualenv for Python 2.7 and install packages
 ```
 virtualenv --python=/usr/bin/python2.7 --no-site-packages env
 source env/bin/activate
-```
 
-## Install requirements
-```
 pip install -r requirements.txt 
 ```
 
